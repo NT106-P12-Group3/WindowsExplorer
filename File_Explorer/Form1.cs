@@ -1,0 +1,314 @@
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Threading.Tasks;
+using System.Windows.Forms;
+
+namespace File_Explorer
+{
+    public partial class Form1 : Form
+    {
+        private string currentPath;
+        private List<string> itemsToCopy = new List<string>();
+        private List<string> itemsToCut = new List<string>();
+        private Stack<string> backStack = new Stack<string>();
+        private Stack<string> forwardStack = new Stack<string>();
+        private bool isCutOperation = false;
+
+        public Form1()
+        {
+            InitializeComponent();
+            currentPath = Environment.GetFolderPath(Environment.SpecialFolder.Desktop);
+            pathtb.Text = currentPath;
+            ShowTreeViewItems(currentPath);
+            ShowDirectoryItems(currentPath);
+            listView1.MouseClick += listView1_MouseClick;
+        }
+
+        private void ShowTreeViewItems(string path)
+        {
+            treeView1.Nodes.Clear();
+            DirectoryInfo rootDirectoryInfo = new DirectoryInfo(path);
+            var rootNode = new TreeNode(rootDirectoryInfo.Name) { Tag = rootDirectoryInfo.FullName };
+            treeView1.Nodes.Add(rootNode);
+            LoadSubDirectories(rootNode);
+        }
+
+        private void LoadSubDirectories(TreeNode node)
+        {
+            var directoryInfo = new DirectoryInfo(node.Tag.ToString());
+            try
+            {
+                foreach (var directory in directoryInfo.GetDirectories())
+                {
+                    var newNode = new TreeNode(directory.Name) { Tag = directory.FullName };
+                    node.Nodes.Add(newNode);
+                    LoadSubDirectories(newNode);
+                }
+            }
+            catch (UnauthorizedAccessException) { }
+        }
+
+        private void ShowDirectoryItems(string path)
+        {
+            listView1.Items.Clear();
+            var directory = new DirectoryInfo(path);
+
+            foreach (var dir in directory.GetDirectories())
+            {
+                ListViewItem item = new ListViewItem(dir.Name, 1); // 1: Index for folder icon
+                item.SubItems.Add("Folder");
+                item.SubItems.Add(dir.LastWriteTime.ToString());
+                listView1.Items.Add(item);
+            }
+
+            foreach (var file in directory.GetFiles())
+            {
+                ListViewItem item = new ListViewItem(file.Name, 0); // 0: Index for file icon
+                item.SubItems.Add(file.Extension);
+                item.SubItems.Add(file.LastWriteTime.ToString());
+                listView1.Items.Add(item);
+            }
+        }
+
+        private void txtPath_TextChanged(object sender, EventArgs e)
+        {
+            if (Directory.Exists(pathtb.Text))
+            {
+                currentPath = pathtb.Text;
+                ShowTreeViewItems(currentPath);
+                ShowDirectoryItems(currentPath);
+            }
+        }
+
+        private void treeView1_AfterSelect(object sender, TreeViewEventArgs e)
+        {
+            string selectedPath = e.Node.Tag.ToString();
+            if (Directory.Exists(selectedPath))
+            {
+                currentPath = selectedPath;
+                pathtb.Text = currentPath;
+                ShowDirectoryItems(currentPath);
+            }
+        }
+
+        private void listView1_DoubleClick(object sender, EventArgs e)
+        {
+            if (listView1.SelectedItems.Count > 0)
+            {
+                string selectedItem = listView1.SelectedItems[0].Text;
+                string newPath = Path.Combine(currentPath, selectedItem);
+
+                if (Directory.Exists(newPath))
+                {
+                    backStack.Push(currentPath);
+                    forwardStack.Clear();
+                    currentPath = newPath;
+                    pathtb.Text = currentPath;
+                    ShowDirectoryItems(currentPath);
+                    ShowTreeViewItems(currentPath);
+                }
+                else if (File.Exists(newPath))
+                {
+                    System.Diagnostics.Process.Start(newPath);
+                }
+            }
+        }
+
+        private void btnForward_Click(object sender, EventArgs e)
+        {
+            if (forwardStack.Count > 0)
+            {
+                backStack.Push(currentPath);
+                currentPath = forwardStack.Pop();
+                pathtb.Text = currentPath;
+                ShowDirectoryItems(currentPath);
+            }
+        }
+
+        private void btnBack_Click(object sender, EventArgs e)
+        {
+            if (backStack.Count > 0)
+            {
+                forwardStack.Push(currentPath);
+                currentPath = backStack.Pop();
+                pathtb.Text = currentPath;
+                ShowDirectoryItems(currentPath);
+            }
+        }
+
+        private void btnOpen_Click(object sender, EventArgs e)
+        {
+            using (var fbd = new FolderBrowserDialog())
+            {
+                DialogResult result = fbd.ShowDialog();
+
+                if (result == DialogResult.OK && !string.IsNullOrWhiteSpace(fbd.SelectedPath))
+                {
+                    backStack.Push(currentPath);
+                    forwardStack.Clear();
+                    currentPath = fbd.SelectedPath;
+                    pathtb.Text = currentPath;
+                    ShowDirectoryItems(currentPath);
+                }
+            }
+        }
+
+        private void listView1_MouseClick(object sender, MouseEventArgs e)
+        {
+            if (e.Button == MouseButtons.Right)
+            {
+                var contextMenu = new ContextMenuStrip();
+                var copyItem = new ToolStripMenuItem("Copy");
+                var cutItem = new ToolStripMenuItem("Cut");
+                var pasteItem = new ToolStripMenuItem("Paste");
+                var deleteItem = new ToolStripMenuItem("Delete");
+                var newFolderItem = new ToolStripMenuItem("New Folder");
+
+                copyItem.Click += (s, args) => CopySelectedItems();
+                cutItem.Click += (s, args) => CutSelectedItems();
+                pasteItem.Click += (s, args) => PasteItems();
+                deleteItem.Click += (s, args) => DeleteSelectedItems();
+                newFolderItem.Click += (s, args) => CreateNewFolder();
+
+                contextMenu.Items.Add(copyItem);
+                contextMenu.Items.Add(cutItem);
+                contextMenu.Items.Add(pasteItem);
+                contextMenu.Items.Add(deleteItem);
+                contextMenu.Items.Add(newFolderItem);
+
+                contextMenu.Show(listView1, e.Location);
+            }
+        }
+
+        private void DeleteSelectedItems()
+        {
+            if (listView1.SelectedItems.Count > 0)
+            {
+                var result = MessageBox.Show("Are you sure you want to delete the selected items?", "Confirm Delete", MessageBoxButtons.YesNo);
+                if (result == DialogResult.Yes)
+                {
+                    foreach (ListViewItem item in listView1.SelectedItems)
+                    {
+                        string path = Path.Combine(currentPath, item.Text);
+                        if (Directory.Exists(path))
+                        {
+                            Directory.Delete(path, true);
+                        }
+                        else if (File.Exists(path))
+                        {
+                            File.Delete(path);
+                        }
+                    }
+                    ShowDirectoryItems(currentPath);
+                }
+            }
+        }
+
+        private void CreateNewFolder()
+        {
+            string newFolderName = "New Folder";
+            string newFolderPath = Path.Combine(currentPath, newFolderName);
+            int counter = 1;
+
+            while (Directory.Exists(newFolderPath))
+            {
+                newFolderName = $"New Folder ({counter})";
+                newFolderPath = Path.Combine(currentPath, newFolderName);
+                counter++;
+            }
+
+            Directory.CreateDirectory(newFolderPath);
+            ShowDirectoryItems(currentPath);
+        }
+
+        private void CopySelectedItems()
+        {
+            itemsToCopy.Clear();
+            foreach (ListViewItem item in listView1.SelectedItems)
+            {
+                string path = Path.Combine(currentPath, item.Text);
+                itemsToCopy.Add(path);
+            }
+        }
+
+        private void CutSelectedItems()
+        {
+            itemsToCut.Clear();
+            foreach (ListViewItem item in listView1.SelectedItems)
+            {
+                string path = Path.Combine(currentPath, item.Text);
+                itemsToCut.Add(path);
+            }
+            isCutOperation = true;
+        }
+
+        private async void PasteItems()
+        {
+            if (itemsToCopy.Count == 0 && itemsToCut.Count == 0)
+                return;
+
+            string destinationPath = currentPath;
+
+            foreach (var itemPath in itemsToCopy)
+            {
+                string destinationFilePath = Path.Combine(destinationPath, Path.GetFileName(itemPath));
+                await CopyFileAsync(itemPath, destinationFilePath);
+            }
+
+            foreach (var itemPath in itemsToCut)
+            {
+                string destinationFilePath = Path.Combine(destinationPath, Path.GetFileName(itemPath));
+                await CopyFileAsync(itemPath, destinationFilePath);
+                File.Delete(itemPath);
+            }
+
+            itemsToCopy.Clear();
+            itemsToCut.Clear();
+            ShowDirectoryItems(currentPath);
+        }
+
+        private async Task CopyFileAsync(string sourcePath, string destinationPath)
+        {
+            if (File.Exists(sourcePath))
+            {
+                using (FileStream sourceStream = new FileStream(sourcePath, FileMode.Open, FileAccess.Read))
+                using (FileStream destinationStream = new FileStream(destinationPath, FileMode.Create, FileAccess.Write))
+                {
+                    await sourceStream.CopyToAsync(destinationStream);
+                }
+            }
+            else if (Directory.Exists(sourcePath))
+            {
+                DirectoryCopy(sourcePath, destinationPath, true);
+            }
+        }
+
+        private static void DirectoryCopy(string sourceDirName, string destDirName, bool copySubDirs)
+        {
+            DirectoryInfo dir = new DirectoryInfo(sourceDirName);
+            DirectoryInfo[] dirs = dir.GetDirectories();
+
+            if (!Directory.Exists(destDirName))
+            {
+                Directory.CreateDirectory(destDirName);
+            }
+
+            FileInfo[] files = dir.GetFiles();
+            foreach (FileInfo file in files)
+            {
+                string tempPath = Path.Combine(destDirName, file.Name);
+                file.CopyTo(tempPath, false);
+            }
+
+            if (copySubDirs)
+            {
+                foreach (DirectoryInfo subdir in dirs)
+                {
+                    string tempPath = Path.Combine(destDirName, subdir.Name);
+                    DirectoryCopy(subdir.FullName, tempPath, copySubDirs);
+                }
+            }
+        }
+    }
+}
