@@ -1,0 +1,90 @@
+using System;
+using System.IO;
+using System.Windows.Forms;
+
+namespace WinExplorerClone
+{
+    public partial class Form1 : Form
+    {
+        public Form1()
+        {
+            InitializeComponent();
+            LoadDriveNodes(); // Khởi tạo các ổ đĩa khi form load
+        }
+
+        // Load các ổ đĩa vào TreeView
+        private void LoadDriveNodes()
+        {
+            TreeNode rootNode;
+
+            foreach (DriveInfo drive in DriveInfo.GetDrives())
+            {
+                if (drive.IsReady)
+                {
+                    rootNode = new TreeNode(drive.Name);
+                    rootNode.Tag = drive;
+                    rootNode.Nodes.Add("..."); // Thêm node con giả để có thể mở rộng (expand)
+                    treeView1.Nodes.Add(rootNode);
+                }
+            }
+        }
+
+        // Xử lý sự kiện khi mở rộng node trong TreeView
+        private void treeView1_BeforeExpand(object sender, TreeViewCancelEventArgs e)
+        {
+            TreeNode node = e.Node;
+            node.Nodes.Clear();
+
+            DirectoryInfo dir = new DirectoryInfo(node.FullPath);
+
+            try
+            {
+                foreach (DirectoryInfo subDir in dir.GetDirectories())
+                {
+                    TreeNode subNode = new TreeNode(subDir.Name);
+                    subNode.Tag = subDir;
+                    subNode.Nodes.Add("...");
+                    node.Nodes.Add(subNode);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Bắt lỗi nếu không có quyền truy cập
+            }
+        }
+
+        // Xử lý khi click vào node trong TreeView
+        private void treeView1_AfterSelect(object sender, TreeViewEventArgs e)
+        {
+            TreeNode node = e.Node;
+            listView1.Items.Clear();
+            DirectoryInfo dir = new DirectoryInfo(node.FullPath);
+
+            try
+            {
+                // Load các thư mục vào ListView
+                foreach (DirectoryInfo subDir in dir.GetDirectories())
+                {
+                    ListViewItem item = new ListViewItem(subDir.Name);
+                    item.SubItems.Add("Folder");
+                    item.Tag = subDir;
+                    listView1.Items.Add(item);
+                }
+
+                // Load các tệp tin vào ListView
+                foreach (FileInfo file in dir.GetFiles())
+                {
+                    ListViewItem item = new ListViewItem(file.Name);
+                    item.SubItems.Add(file.Extension);
+                    item.SubItems.Add(file.Length.ToString());
+                    item.Tag = file;
+                    listView1.Items.Add(item);
+                }
+            }
+            catch (UnauthorizedAccessException)
+            {
+                // Bắt lỗi nếu không có quyền truy cập
+            }
+        }
+    }
+}
